@@ -119,8 +119,57 @@ jobs:
 
       - name: Generate App Icons
         run: |
-          if [ -f "generate_icons.py" ]; then
-            python3 generate_icons.py
+          cd android
+          MIPMAP_EXISTS=false
+          for dir in app/src/main/res/mipmap-*; do
+            if [ -d "$dir" ] && [ "$(ls -A $dir 2>/dev/null)" ]; then
+              MIPMAP_EXISTS=true
+              break
+            fi
+          done
+          if [ "$MIPMAP_EXISTS" = "false" ]; then
+            echo "🎨 Icons missing, generating placeholder icons..."
+            mkdir -p app/src/main/res/mipmap-hdpi
+            mkdir -p app/src/main/res/mipmap-mdpi
+            mkdir -p app/src/main/res/mipmap-xhdpi
+            mkdir -p app/src/main/res/mipmap-xxhdpi
+            mkdir -p app/src/main/res/mipmap-xxxhdpi
+            python3 << 'PYEOF'
+from PIL import Image
+import os
+sizes = {
+    'mipmap-mdpi': 48,
+    'mipmap-hdpi': 72,
+    'mipmap-xhdpi': 96,
+    'mipmap-xxhdpi': 144,
+    'mipmap-xxxhdpi': 192
+}
+base_dir = 'app/src/main/res'
+icons = ['ic_launcher', 'ic_launcher_round', 'ic_theme_xnxx', 
+         'ic_theme_telegram', 'ic_theme_instagram', 
+         'ic_theme_youtube', 'ic_theme_whatsapp']
+colors = {
+    'ic_launcher': (66, 133, 244),
+    'ic_launcher_round': (66, 133, 244),
+    'ic_theme_xnxx': (255, 0, 0),
+    'ic_theme_telegram': (0, 136, 204),
+    'ic_theme_instagram': (225, 48, 108),
+    'ic_theme_youtube': (255, 0, 0),
+    'ic_theme_whatsapp': (37, 211, 102)
+}
+for icon in icons:
+    for folder, size in sizes.items():
+        path = os.path.join(base_dir, folder)
+        os.makedirs(path, exist_ok=True)
+        img = Image.new('RGBA', (size, size), colors.get(icon, (100, 100, 100)))
+        img.save(os.path.join(path, f'{icon}.png'))
+print("✅ Icons generated")
+PYEOF
+          else
+            echo "✅ Icons already exist"
+          fi
+          if [ -f "../generate_icons.py" ]; then
+            python3 ../generate_icons.py
           fi
 
       - name: Build APK
