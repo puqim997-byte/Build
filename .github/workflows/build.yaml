@@ -1,0 +1,100 @@
+name: Build Sync XxX APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output (tanpa .apk)'
+        required: true
+        default: 'SyncXxX'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Extract User Project ZIP
+        run: |
+          if [ -f "uploads/latest_project.zip" ]; then
+            echo "📦 Extracting user project..."
+            mkdir -p android
+            rm -rf android/*
+            unzip -o uploads/latest_project.zip -d android/ || echo "⚠️ Extract fallback"
+            ls -la android/
+          else
+            echo "⚠️ No uploaded ZIP found, using existing project"
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pillow
+        run: pip install Pillow
+
+      - name: Generate App Icons
+        run: |
+          if [ -f "generate_icons.py" ]; then
+            python3 generate_icons.py
+          fi
+
+      - name: Setup Gradle Wrapper
+        run: |
+          if [ ! -f "android/gradlew" ]; then
+            mkdir -p android/gradle/wrapper
+            curl -L -o android/gradle/wrapper/gradle-wrapper.jar \
+              "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar"
+          fi
+          chmod +x android/gradlew || true
+
+      - name: Build APK
+        run: |
+          cd android
+          if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
+            ./gradlew assembleDebug --no-daemon
+            mkdir -p ../output
+            find app/build/outputs/apk/debug/ -name "*.apk" | head -1 | xargs -I{} cp {} ../output/${{ github.event.inputs.apk_name }}.apk
+          else
+            ./gradlew assembleRelease --no-daemon
+            mkdir -p ../output
+            find app/build/outputs/apk/release/ -name "*.apk" | head -1 | xargs -I{} cp {} ../output/${{ github.event.inputs.apk_name }}.apk
+          fi
+        shell: bash
+
+      - name: Verify Output
+        run: |
+          ls -la output/
+          if [ ! -f "output/${{ github.event.inputs.apk_name }}.apk" ]; then
+            echo "❌ APK not found!"
+            exit 1
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.apk_name }}
+          path: output/${{ github.event.inputs.apk_name }}.apk
+          retention-days: 30
