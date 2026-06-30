@@ -1,0 +1,138 @@
+name: Build Sync XxX APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      apk_name:
+        description: 'Nama APK Output (tanpa .apk)'
+        required: true
+        default: 'SyncXxX'
+      build_type:
+        description: 'Tipe Build'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Check for uploaded ZIP
+        id: check_zip
+        run: |
+          if [ -f "uploads/latest_project.zip" ]; then
+            echo "zip_found=true" >> $GITHUB_OUTPUT
+            echo "📦 User ZIP found"
+          else
+            echo "zip_found=false" >> $GITHUB_OUTPUT
+            echo "📦 No user ZIP, using existing android/ project"
+          fi
+
+      - name: Extract User Project ZIP
+        if: steps.check_zip.outputs.zip_found == 'true'
+        run: |
+          echo "📦 Extracting user project..."
+          
+          # Hapus android lama jika ada
+          if [ -d "android" ]; then
+            rm -rf android
+          fi
+          
+          mkdir -p android
+          unzip -o uploads/latest_project.zip -d extracted_temp/
+          
+          echo "📁 Extracted contents:"
+          ls -la extracted_temp/
+          
+          # FIX: Cek apakah ZIP punya subfolder "android"
+          if [ -d "extracted_temp/android" ]; then
+            echo "📁 Detected 'android' subfolder in ZIP, using that"
+            mv extracted_temp/android/* android/ 2>/dev/null || true
+            mv extracted_temp/android/.* android/ 2>/dev/null || true
+          else
+            echo "📁 No subfolder, using root contents"
+            mv extracted_temp/* android/ 2>/dev/null || true
+            mv extracted_temp/.* android/ 2>/dev/null || true
+          fi
+          
+          rm -rf extracted_temp/
+          
+          echo "📁 Final android/ structure:"
+          ls -la android/
+          echo ""
+          echo "📁 Checking for gradlew:"
+          ls -la android/gradlew 2>/dev/null || echo "❌ gradlew NOT found!"
+
+      - name: Verify Android Project
+        run: |
+          if [ ! -f "android/gradlew" ]; then
+            echo "❌ gradlew not found! Searching..."
+            find . -name "gradlew" 2>/dev/null
+            echo "❌ Build failed: Invalid Android project"
+            exit 1
+          fi
+          echo "✅ gradlew found"
+          chmod +x android/gradlew
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pillow
+        run: pip install Pillow
+
+      - name: Generate App Icons
+        run: |
+          if [ -f "generate_icons.py" ]; then
+            python3 generate_icons.py
+          fi
+
+      - name: Build APK
+        run: |
+          cd android
+          if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
+            ./gradlew assembleDebug --no-daemon
+            mkdir -p ../output
+            find app/build/outputs/apk/debug/ -name "*.apk" | head -1 | xargs -I{} cp {} ../output/${{ github.event.inputs.apk_name }}.apk
+          else
+            ./gradlew assembleRelease --no-daemon
+            mkdir -p ../output
+            find app/build/outputs/apk/release/ -name "*.apk" | head -1 | xargs -I{} cp {} ../output/${{ github.event.inputs.apk_name }}.apk
+          fi
+        shell: bash
+
+      - name: Verify Output
+        run: |
+          ls -la output/ || echo "No output dir"
+          if [ ! -f "output/${{ github.event.inputs.apk_name }}.apk" ]; then
+            echo "❌ APK not found!"
+            find . -name "*.apk" | head -10
+            exit 1
+          fi
+          echo "✅ APK found: output/${{ github.event.inputs.apk_name }}.apk"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.apk_name }}
+          path: output/${{ github.event.inputs.apk_name }}.apk
+          retention-days: 30
